@@ -6,7 +6,7 @@ import { StatusBar } from '@/components/status-bar';
 import { HomeIndicator } from '@/components/home-indicator';
 import { PageTitleBar } from '@/components/page-title-bar';
 import { ChevronDown, Check, Mic, MicOff } from 'lucide-react';
-import { autoCorrelate, centsBetween } from '@/lib/pitch';
+import { autoCorrelate, centsBetween, freqToNote } from '@/lib/pitch';
 
 type StringNote = { label: string; octave: number; freq: string };
 type Tuning = { id: string; name: string; strings: StringNote[] };
@@ -199,6 +199,19 @@ export default function TunerPage() {
   const indicatorPos = Math.max(0, Math.min(100, ((displayCents + 50) / 100) * 100));
   const inTune = detected != null && Math.abs(displayCents) < 5;
 
+  // Side-glow intensity: ramps from 0 at ±5¢ up to 1 at ±35¢ (caps there)
+  const glowIntensity = (() => {
+    if (!detected) return 0;
+    const abs = Math.abs(displayCents);
+    if (abs < 5) return 0;
+    return Math.min(1, (abs - 5) / 30);
+  })();
+  const flatness = displayCents < 0 ? glowIntensity : 0;
+  const sharpness = displayCents > 0 ? glowIntensity : 0;
+
+  // What note the mic is actually hearing (independent of nearest string)
+  const heardNote = detected ? freqToNote(detected.freq) : null;
+
   const selectTuning = (idx: number) => {
     setTuningIdx(idx);
     setManualStringIdx(null);
@@ -210,6 +223,33 @@ export default function TunerPage() {
       <CrossLitHalos intensity="medium" />
       <StatusBar />
       <PageTitleBar title="Tuner" />
+
+      {/* === Sharp/Flat side glows === */}
+      <div
+        className="absolute top-[140px] bottom-[140px] left-0 w-[180px] pointer-events-none transition-opacity duration-200"
+        style={{
+          background:
+            'radial-gradient(ellipse at left center, rgba(93,211,232,0.55), rgba(93,211,232,0.18) 40%, transparent 75%)',
+          opacity: flatness,
+        }}
+      />
+      <div
+        className="absolute top-[140px] bottom-[140px] right-0 w-[180px] pointer-events-none transition-opacity duration-200"
+        style={{
+          background:
+            'radial-gradient(ellipse at right center, rgba(255,182,97,0.55), rgba(255,182,97,0.18) 40%, transparent 75%)',
+          opacity: sharpness,
+        }}
+      />
+      {/* In-tune halo behind the big note */}
+      <div
+        className="absolute top-[170px] left-1/2 -translate-x-1/2 w-[260px] h-[200px] rounded-full pointer-events-none transition-opacity duration-300"
+        style={{
+          background:
+            'radial-gradient(circle, rgba(255,216,154,0.32), rgba(255,216,154,0.08) 50%, transparent 75%)',
+          opacity: inTune ? 1 : 0,
+        }}
+      />
 
       {/* Tuning preset picker */}
       <div ref={pickerRef} className="absolute top-[108px] left-1/2 -translate-x-1/2 z-20">
@@ -247,7 +287,7 @@ export default function TunerPage() {
         )}
       </div>
 
-      {/* Detected note (or fallback) */}
+      {/* Big note display: target prominent, heard underneath */}
       <div className="absolute top-[180px] left-0 right-0 text-center pointer-events-none">
         <div
           className={`text-[112px] font-light leading-none tabular-nums transition-colors ${
@@ -257,19 +297,45 @@ export default function TunerPage() {
         >
           {targetString.label}
         </div>
-        <div className="mt-2 text-[13px] text-text/55 tabular-nums tracking-wider">
+
+        {/* Target line */}
+        <div className="mt-2 text-[11px] tracking-wider uppercase text-text/45 font-medium">
+          Target
+        </div>
+        <div className="text-[13px] text-text/75 tabular-nums tracking-wider mt-0.5">
           {targetString.label}
           {targetString.octave} · {targetString.freq} Hz
-          {detected != null && (
-            <span className="ml-2 text-text/35">
-              ({detected.freq.toFixed(1)} Hz)
-            </span>
+        </div>
+
+        {/* Hearing line */}
+        <div className="mt-3 text-[11px] tracking-wider uppercase text-text/45 font-medium">
+          Hearing
+        </div>
+        <div className="text-[13px] tabular-nums tracking-wider mt-0.5 min-h-[18px]">
+          {heardNote ? (
+            <>
+              <span
+                className={`font-medium ${
+                  inTune
+                    ? 'text-amber'
+                    : displayCents < 0
+                    ? 'text-cyan-deep'
+                    : 'text-amber-deep'
+                }`}
+              >
+                {heardNote.name}
+                {heardNote.octave}
+              </span>
+              <span className="text-text/55"> · {detected!.freq.toFixed(1)} Hz</span>
+            </>
+          ) : (
+            <span className="text-text/35">—</span>
           )}
         </div>
       </div>
 
       {/* Cents meter */}
-      <div className="absolute top-[380px] left-6 right-6">
+      <div className="absolute top-[420px] left-6 right-6">
         <div
           className="relative h-[5px] rounded-sm overflow-hidden"
           style={{
@@ -319,7 +385,7 @@ export default function TunerPage() {
       </div>
 
       {/* String buttons */}
-      <div className="absolute top-[490px] left-4 right-4 flex justify-between">
+      <div className="absolute top-[510px] left-4 right-4 flex justify-between">
         {tuning.strings.map((s, i) => {
           const active = i === targetStringIdx;
           return (
@@ -339,7 +405,7 @@ export default function TunerPage() {
       </div>
 
       {/* Mic status / instructions */}
-      <div className="absolute top-[555px] left-0 right-0 text-center px-6">
+      <div className="absolute top-[570px] left-0 right-0 text-center px-6">
         {micState === 'listening' && (
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-text/50">
             <Mic size={11} className="text-amber" />
