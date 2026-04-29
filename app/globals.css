@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  background: #000;
+  color: #F5EBD7;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-family: system-ui, -apple-system, 'SF Pro', 'Helvetica Neue', sans-serif;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Hide scrollbars on horizontal-scroll pill rows */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+@keyframes soundBar {
+  0%, 100% { height: 3px; }
+  50%      { height: 11px; }
+}
+.sound-bar { animation: soundBar 0.55s ease-in-out infinite; }
+
+/* On real mobile devices, expand the phone-frame to fill the viewport */
+@media (max-width: 480px) {
+  .phone-frame-wrapper {
+    padding: 0 !important;
+    background: #0A0E18 !important;
+    align-items: stretch !important;
+  }
+  .phone-frame {
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+}
