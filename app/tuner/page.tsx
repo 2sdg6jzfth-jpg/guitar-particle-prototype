@@ -5,7 +5,8 @@ import { CrossLitHalos } from '@/components/cross-lit-halos';
 import { StatusBar } from '@/components/status-bar';
 import { HomeIndicator } from '@/components/home-indicator';
 import { PageTitleBar } from '@/components/page-title-bar';
-import { ChevronDown, Check } from 'lucide-react';
+import { ChevronDown, Check, Mic, MicOff } from 'lucide-react';
+import { autoCorrelate, centsBetween } from '@/lib/pitch';
 
 type StringNote = { label: string; octave: number; freq: string };
 type Tuning = { id: string; name: string; strings: StringNote[] };
@@ -73,15 +74,34 @@ const TUNINGS: Tuning[] = [
   },
 ];
 
+type MicState = 'idle' | 'requesting' | 'listening' | 'denied' | 'error';
+
 export default function TunerPage() {
   const [tuningIdx, setTuningIdx] = useState(0);
-  const [activeIdx, setActiveIdx] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [manualStringIdx, setManualStringIdx] = useState<number | null>(null);
+  const [detected, setDetected] = useState<{
+    freq: number;
+    nearestStringIdx: number;
+    cents: number;
+  } | null>(null);
+  const [micState, setMicState] = useState<MicState>('idle');
+  const [errorMsg, setErrorMsg] = useState<string>('');
+
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef<number | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const tuningIdxRef = useRef(tuningIdx);
+
+  // Keep ref in sync so the audio loop sees the latest tuning
+  useEffect(() => {
+    tuningIdxRef.current = tuningIdx;
+  }, [tuningIdx]);
 
   const tuning = TUNINGS[tuningIdx];
-  const active = tuning.strings[activeIdx];
 
+  // Outside-click handler for picker
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
@@ -92,9 +112,96 @@ export default function TunerPage() {
     return () => document.removeEventListener('mousedown', handler);
   }, [pickerOpen]);
 
+  const startMic = async () => {
+    setMicState('requesting');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+      streamRef.current = stream;
+
+      const Ctor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new Ctor();
+      audioCtxRef.current = ctx;
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      src.connect(analyser);
+
+      const buffer = new Float32Array(analyser.fftSize);
+      setMicState('listening');
+
+      const loop = () => {
+        analyser.getFloatTimeDomainData(buffer);
+        const freq = autoCorrelate(buffer, ctx.sampleRate);
+
+        if (freq > 60 && freq < 1500) {
+          // Find nearest string in current tuning
+          const currentTuning = TUNINGS[tuningIdxRef.current];
+          let bestIdx = 0;
+          let bestAbsCents = Infinity;
+          let bestSignedCents = 0;
+          currentTuning.strings.forEach((s, i) => {
+            const c = centsBetween(freq, parseFloat(s.freq));
+            if (Math.abs(c) < bestAbsCents) {
+              bestAbsCents = Math.abs(c);
+              bestSignedCents = c;
+              bestIdx = i;
+            }
+          });
+          setDetected({ freq, nearestStringIdx: bestIdx, cents: bestSignedCents });
+        }
+        // Else: keep last detection visible (don't reset to null on silence)
+
+        rafRef.current = requestAnimationFrame(loop);
+      };
+      loop();
+    } catch (e) {
+      const err = e as Error;
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setMicState('denied');
+      } else {
+        setMicState('error');
+        setErrorMsg(err.message || 'Could not access microphone');
+      }
+    }
+  };
+
+  // Auto-start mic on mount
+  useEffect(() => {
+    startMic();
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+      if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+        audioCtxRef.current.close().catch(() => {});
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Effective target string: manual selection beats auto-detect
+  const targetStringIdx =
+    manualStringIdx !== null ? manualStringIdx : detected?.nearestStringIdx ?? 0;
+  const targetString = tuning.strings[targetStringIdx];
+
+  // If manual mode AND we have a detected freq, recalc cents vs the manually-picked string
+  const displayCents =
+    detected != null
+      ? manualStringIdx !== null
+        ? centsBetween(detected.freq, parseFloat(targetString.freq))
+        : detected.cents
+      : 0;
+
+  // Indicator position: -50¢ → 0%, 0¢ → 50%, +50¢ → 100%
+  const indicatorPos = Math.max(0, Math.min(100, ((displayCents + 50) / 100) * 100));
+  const inTune = detected != null && Math.abs(displayCents) < 5;
+
   const selectTuning = (idx: number) => {
     setTuningIdx(idx);
-    setActiveIdx(0);
+    setManualStringIdx(null);
     setPickerOpen(false);
   };
 
@@ -104,6 +211,7 @@ export default function TunerPage() {
       <StatusBar />
       <PageTitleBar title="Tuner" />
 
+      {/* Tuning preset picker */}
       <div ref={pickerRef} className="absolute top-[108px] left-1/2 -translate-x-1/2 z-20">
         <button
           onClick={() => setPickerOpen(o => !o)}
@@ -116,7 +224,6 @@ export default function TunerPage() {
             strokeWidth={2.5}
           />
         </button>
-
         {pickerOpen && (
           <div className="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 w-[210px] bg-bg-surface border border-text/10 rounded-xl shadow-sheet overflow-hidden z-30">
             {TUNINGS.map((t, i) => (
@@ -140,19 +247,28 @@ export default function TunerPage() {
         )}
       </div>
 
+      {/* Detected note (or fallback) */}
       <div className="absolute top-[180px] left-0 right-0 text-center pointer-events-none">
         <div
-          className="text-[112px] font-light text-text leading-none tabular-nums"
+          className={`text-[112px] font-light leading-none tabular-nums transition-colors ${
+            inTune ? 'text-amber' : 'text-text'
+          }`}
           style={{ letterSpacing: '-3px' }}
         >
-          {active.label}
+          {targetString.label}
         </div>
         <div className="mt-2 text-[13px] text-text/55 tabular-nums tracking-wider">
-          {active.label}
-          {active.octave} · {active.freq} Hz
+          {targetString.label}
+          {targetString.octave} · {targetString.freq} Hz
+          {detected != null && (
+            <span className="ml-2 text-text/35">
+              ({detected.freq.toFixed(1)} Hz)
+            </span>
+          )}
         </div>
       </div>
 
+      {/* Cents meter */}
       <div className="absolute top-[380px] left-6 right-6">
         <div
           className="relative h-[5px] rounded-sm overflow-hidden"
@@ -163,8 +279,21 @@ export default function TunerPage() {
         >
           <div className="absolute -top-2 -bottom-2 left-1/2 w-0.5 -ml-px bg-text/85 rounded-full" />
           <div
-            className="absolute -top-2.5 w-5 h-5 rounded-full bg-text border-[1.5px] border-cyan-deep -ml-2.5"
-            style={{ left: '38%', boxShadow: '0 0 18px rgba(93,211,232,0.55)' }}
+            className={`absolute -top-2.5 w-5 h-5 rounded-full border-[1.5px] -ml-2.5 transition-all duration-150 ${
+              inTune
+                ? 'bg-amber border-amber'
+                : displayCents < 0
+                ? 'bg-text border-cyan-deep'
+                : 'bg-text border-amber'
+            }`}
+            style={{
+              left: `${indicatorPos}%`,
+              boxShadow: inTune
+                ? '0 0 18px rgba(255,216,154,0.65)'
+                : displayCents < 0
+                ? '0 0 18px rgba(93,211,232,0.55)'
+                : '0 0 18px rgba(255,216,154,0.35)',
+            }}
           />
         </div>
         <div className="flex justify-between mt-3.5 text-[9px] text-text/50 tracking-wider uppercase tabular-nums">
@@ -174,31 +303,74 @@ export default function TunerPage() {
           <span>+10</span>
           <span>+50</span>
         </div>
+        {detected != null && (
+          <div className="mt-2 text-center text-[11px] text-text/55 tabular-nums">
+            {Math.abs(displayCents) < 1 ? '0' : (displayCents > 0 ? '+' : '') + displayCents.toFixed(1)}
+            ¢{' '}
+            {inTune ? (
+              <span className="text-amber font-medium">In tune</span>
+            ) : displayCents < 0 ? (
+              <span className="text-cyan-deep">Flat</span>
+            ) : (
+              <span className="text-amber/80">Sharp</span>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="absolute top-[470px] left-4 right-4 flex justify-between">
-        {tuning.strings.map((s, i) => (
-          <button
-            key={`${tuning.id}-${i}`}
-            onClick={() => setActiveIdx(i)}
-            className={`w-10 h-10 rounded-full text-sm font-medium transition-colors ${
-              i === activeIdx
-                ? 'bg-amber/15 border border-amber/50 text-amber'
-                : 'bg-text/[0.04] border border-text/10 text-text'
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
+      {/* String buttons */}
+      <div className="absolute top-[490px] left-4 right-4 flex justify-between">
+        {tuning.strings.map((s, i) => {
+          const active = i === targetStringIdx;
+          return (
+            <button
+              key={`${tuning.id}-${i}`}
+              onClick={() => setManualStringIdx(i === manualStringIdx ? null : i)}
+              className={`w-10 h-10 rounded-full text-sm font-medium transition-colors ${
+                active
+                  ? 'bg-amber/15 border border-amber/50 text-amber'
+                  : 'bg-text/[0.04] border border-text/10 text-text'
+              }`}
+            >
+              {s.label}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="absolute top-[535px] left-0 right-0 text-center text-[11px] text-text/40">
-        Auto-detecting · or tap a string
+      {/* Mic status / instructions */}
+      <div className="absolute top-[555px] left-0 right-0 text-center px-6">
+        {micState === 'listening' && (
+          <div className="flex items-center justify-center gap-1.5 text-[11px] text-text/50">
+            <Mic size={11} className="text-amber" />
+            <span>
+              {manualStringIdx !== null
+                ? `Tuning ${tuning.strings[manualStringIdx].label}${tuning.strings[manualStringIdx].octave} — tap again for auto`
+                : 'Listening · play any string'}
+            </span>
+          </div>
+        )}
+        {(micState === 'requesting' || micState === 'idle') && (
+          <div className="text-[11px] text-text/45">Asking for microphone…</div>
+        )}
+        {micState === 'denied' && (
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex items-center gap-1.5 text-[11px] text-destructive">
+              <MicOff size={11} />
+              <span>Microphone access denied</span>
+            </div>
+            <button
+              onClick={startMic}
+              className="px-3 py-1.5 rounded-2xl bg-amber/15 border border-amber/40 text-amber text-[11px] font-medium"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+        {micState === 'error' && (
+          <div className="text-[11px] text-destructive">Mic error: {errorMsg}</div>
+        )}
       </div>
-
-      <p className="absolute bottom-12 left-0 right-0 text-center text-[10px] text-text/30 px-8">
-        Prototype tuner — pitch detection comes in the production app.
-      </p>
 
       <HomeIndicator />
     </>

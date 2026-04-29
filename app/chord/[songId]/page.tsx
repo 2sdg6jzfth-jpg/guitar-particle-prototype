@@ -23,6 +23,7 @@ import {
   type Chord,
 } from '@/lib/mock-data';
 import { storage, type LibraryCategory } from '@/lib/storage';
+import { playChord, playClick } from '@/lib/audio';
 
 type View = 'Diagrams' | 'Lyrics' | 'Tabs';
 const VIEW_OPTIONS = ['Diagrams', 'Lyrics', 'Tabs'] as const;
@@ -99,25 +100,44 @@ export default function ChordPage() {
 
   const strumPattern = strumMode === 'Real' ? song.realStrumPattern : song.simpleStrumPattern;
 
+  // Play loop: metronome ticks every beat, chords change every 2 beats and play audibly
   useEffect(() => {
     if (!isPlaying) {
       if (playRef.current) clearInterval(playRef.current);
       setPlayingChord(null);
       return;
     }
-    let i = 0;
+    let beatCount = 0;
+    const beatMs = (60 / bpm) * 1000;
+
     const tick = () => {
-      const chord = currentSection.chords[i % currentSection.chords.length];
-      setPlayingChord(chord.name);
-      i++;
+      const isDownbeat = beatCount % 4 === 0;
+      try {
+        playClick(isDownbeat);
+      } catch {
+        // Audio not available — keep visual loop running
+      }
+
+      if (beatCount % 2 === 0) {
+        const chordIdx = (beatCount / 2) % currentSection.chords.length;
+        const chord = currentSection.chords[chordIdx];
+        const voicing = getVoicing(chord);
+        try {
+          playChord(voicing, capoFret);
+        } catch {
+          // ignore
+        }
+        setPlayingChord(chord.name);
+      }
+      beatCount++;
     };
-    tick();
-    const interval = (60 / bpm) * 1000 * 2;
-    playRef.current = setInterval(tick, interval);
+
+    tick(); // first beat immediately
+    playRef.current = setInterval(tick, beatMs);
     return () => {
       if (playRef.current) clearInterval(playRef.current);
     };
-  }, [isPlaying, bpm, currentSection]);
+  }, [isPlaying, bpm, currentSection, capoFret, position]);
 
   const handleViewChange = (v: View) => {
     if (v === 'Tabs' && !storage.isPro()) {
@@ -171,8 +191,13 @@ export default function ChordPage() {
                 size={large ? 'lg' : 'md'}
                 isPlaying={playingChord === chord.name}
                 onClick={() => {
+                  try {
+                    playChord(voicing, capoFret);
+                  } catch {
+                    // ignore
+                  }
                   setPlayingChord(chord.name);
-                  setTimeout(() => setPlayingChord(null), 800);
+                  setTimeout(() => setPlayingChord(null), 1200);
                 }}
               />
             );
