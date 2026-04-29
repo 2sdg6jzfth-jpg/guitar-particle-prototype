@@ -6,7 +6,7 @@ import { CrossLitHalos } from '@/components/cross-lit-halos';
 import { StatusBar } from '@/components/status-bar';
 import { HomeIndicator } from '@/components/home-indicator';
 import { Plectrum } from '@/components/plectrum';
-import { Indicator } from '../welcome/page';
+import { OnboardingIndicator } from '@/components/onboarding-indicator';
 import { storage } from '@/lib/storage';
 
 const ACCOUNT_KEY = 'guitar_particle_onboarding_partial';
@@ -60,7 +60,7 @@ export default function DonePage() {
         Finish setup
       </button>
 
-      <Indicator step={5} />
+      <OnboardingIndicator step={5} />
       <HomeIndicator />
     </>
   );

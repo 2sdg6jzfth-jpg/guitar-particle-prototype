@@ -6,6 +6,7 @@ import { CrossLitHalos } from '@/components/cross-lit-halos';
 import { StatusBar } from '@/components/status-bar';
 import { HomeIndicator } from '@/components/home-indicator';
 import { Plectrum } from '@/components/plectrum';
+import { OnboardingIndicator } from '@/components/onboarding-indicator';
 
 export default function WelcomePage() {
   return (
@@ -44,7 +45,7 @@ export default function WelcomePage() {
         Get started
       </Link>
 
-      <Indicator step={1} />
+      <OnboardingIndicator step={1} />
       <HomeIndicator />
     </>
   );
@@ -57,21 +58,6 @@ function Step({ n, label }: { n: number; label: string }) {
         {n}
       </div>
       <span className="text-[13px] text-text/85">{label}</span>
-    </div>
-  );
-}
-
-export function Indicator({ step }: { step: number }) {
-  return (
-    <div className="absolute bottom-[120px] left-0 right-0 flex justify-center gap-1.5">
-      {[1, 2, 3, 4, 5].map(i => (
-        <span
-          key={i}
-          className={`h-1 rounded-full transition-all ${
-            i === step ? 'w-6 bg-amber' : 'w-1 bg-text/25'
-          }`}
-        />
-      ))}
     </div>
   );
 }

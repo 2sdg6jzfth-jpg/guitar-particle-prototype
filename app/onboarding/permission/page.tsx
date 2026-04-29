@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { CrossLitHalos } from '@/components/cross-lit-halos';
 import { StatusBar } from '@/components/status-bar';
 import { HomeIndicator } from '@/components/home-indicator';
-import { Indicator } from '../welcome/page';
+import { OnboardingIndicator } from '@/components/onboarding-indicator';
 import { ChevronLeft, Mic } from 'lucide-react';
 
 export default function PermissionPage() {
@@ -73,7 +73,7 @@ export default function PermissionPage() {
         </button>
       </div>
 
-      <Indicator step={4} />
+      <OnboardingIndicator step={4} />
       <HomeIndicator />
     </>
   );

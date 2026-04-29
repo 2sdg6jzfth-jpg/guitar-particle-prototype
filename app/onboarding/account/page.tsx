@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { CrossLitHalos } from '@/components/cross-lit-halos';
 import { StatusBar } from '@/components/status-bar';
 import { HomeIndicator } from '@/components/home-indicator';
-import { Indicator } from '../welcome/page';
+import { OnboardingIndicator } from '@/components/onboarding-indicator';
 import { ChevronLeft } from 'lucide-react';
 
 const ACCOUNT_KEY = 'guitar_particle_onboarding_partial';
@@ -77,7 +77,7 @@ export default function AccountPage() {
         Continue
       </button>
 
-      <Indicator step={2} />
+      <OnboardingIndicator step={2} />
       <HomeIndicator />
     </>
   );
