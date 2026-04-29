@@ -68,6 +68,17 @@ export const storage = {
     all.push(song);
     storage.setSavedSongs(all);
   },
+  removeSavedSong(songId: string) {
+    const existing = storage.getSavedSongs();
+    const removed = existing.find(s => s.songId === songId);
+    storage.setSavedSongs(existing.filter(s => s.songId !== songId));
+    if (removed) {
+      const cats = storage.getCategories().map(c =>
+        c.id === removed.categoryId ? { ...c, count: Math.max(0, c.count - 1) } : c
+      );
+      storage.setCategories(cats);
+    }
+  },
   isSongSaved(songId: string): boolean {
     return storage.getSavedSongs().some(s => s.songId === songId);
   },

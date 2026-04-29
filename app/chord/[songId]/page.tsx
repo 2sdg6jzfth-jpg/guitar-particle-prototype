@@ -163,8 +163,17 @@ export default function ChordPage() {
           </div>
         </div>
         <button
-          onClick={() => setSaveSheetOpen(true)}
-          aria-label={isSaved ? 'Saved' : 'Save'}
+          onClick={() => {
+            if (isSaved) {
+              storage.removeSavedSong(song.id);
+              setIsSaved(false);
+              setCategories(storage.getCategories());
+              showToast('Removed from library');
+            } else {
+              setSaveSheetOpen(true);
+            }
+          }}
+          aria-label={isSaved ? 'Remove from library' : 'Save'}
           className={`w-[42px] h-[42px] rounded-full border flex items-center justify-center transition-colors ${
             isSaved ? 'border-amber bg-amber/15' : 'border-text/15 bg-transparent'
           }`}
