@@ -13,7 +13,12 @@ import { SaveSheet } from '@/components/save-sheet';
 import { ProPaywall } from '@/components/pro-paywall';
 import { Toast } from '@/components/toast';
 import { Cover } from '@/components/cover';
-import { wonderwall, CHROMATIC_KEYS, type Chord } from '@/lib/mock-data';
+import {
+  wonderwall,
+  CHROMATIC_KEYS,
+  transposeChordName,
+  type Chord,
+} from '@/lib/mock-data';
 import { storage, type LibraryCategory } from '@/lib/storage';
 
 type View = 'Diagrams' | 'Lyrics' | 'Tabs';
@@ -23,15 +28,19 @@ const STRUM_OPTIONS = ['Simple', 'Real'] as const;
 
 export default function ChordPage() {
   const router = useRouter();
-  const song = wonderwall; // mock: always Wonderwall
+  const song = wonderwall;
+  const originalCapo = song.capo ?? 0;
 
   const [view, setView] = useState<View>('Diagrams');
-  const [selectedSection, setSelectedSection] = useState(song.sections[1].name); // Verse
+  const [selectedSection, setSelectedSection] = useState(song.sections[1].name);
   const [strumMode, setStrumMode] = useState<(typeof STRUM_OPTIONS)[number]>('Real');
   const [hand, setHand] = useState<(typeof HAND_OPTIONS)[number]>('R');
   const [keyValue, setKeyValue] = useState(song.originalKey);
   const [position, setPosition] = useState('1');
   const [bpm, setBpm] = useState(song.bpm);
+  const [capoFret, setCapoFret] = useState(originalCapo);
+  const [capoOpen, setCapoOpen] = useState(false);
+  const capoRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playingChord, setPlayingChord] = useState<string | null>(null);
   const [saveSheetOpen, setSaveSheetOpen] = useState(false);
@@ -50,6 +59,15 @@ export default function ChordPage() {
     if (playRef.current) clearInterval(playRef.current);
   }, []);
 
+  // Close capo popover on outside click
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (capoRef.current && !capoRef.current.contains(e.target as Node)) setCapoOpen(false);
+    };
+    if (capoOpen) document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [capoOpen]);
+
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 1800);
@@ -60,7 +78,24 @@ export default function ChordPage() {
     [selectedSection, song.sections]
   );
 
-  // Strum patterns
+  // Capo transposition: how many semitones to shift display names
+  const capoSemitoneShift = capoFret - originalCapo;
+  const displayName = (chordName: string) =>
+    capoSemitoneShift === 0 ? chordName : transposeChordName(chordName, capoSemitoneShift);
+
+  // Pick voicing for a chord based on the position state
+  const positionIdx = parseInt(position, 10) - 1;
+  const getVoicing = (chord: Chord) => {
+    return chord.voicings[positionIdx] ?? chord.voicings[0];
+  };
+
+  // Available positions = max # of voicings across the section's chords
+  const maxVoicings = Math.max(...currentSection.chords.map(c => c.voicings.length));
+  const positionOptions = Array.from({ length: maxVoicings }, (_, i) => ({
+    value: String(i + 1),
+    label: `Position ${i + 1}${i === 0 ? ' (open)' : ''}`,
+  }));
+
   const strumPattern = strumMode === 'Real' ? song.realStrumPattern : song.simpleStrumPattern;
 
   // Auto-cycle playing chord during play
@@ -77,7 +112,7 @@ export default function ChordPage() {
       i++;
     };
     tick();
-    const interval = (60 / bpm) * 1000 * 2; // half-note per chord
+    const interval = (60 / bpm) * 1000 * 2;
     playRef.current = setInterval(tick, interval);
     return () => {
       if (playRef.current) clearInterval(playRef.current);
@@ -102,7 +137,6 @@ export default function ChordPage() {
       isPreferredKey: keyValue !== song.originalKey,
       savedAt: Date.now(),
     });
-    // bump category count
     const updated = storage.getCategories().map(c =>
       c.id === categoryId ? { ...c, count: c.count + 1 } : c
     );
@@ -135,60 +169,131 @@ export default function ChordPage() {
       </button>
 
       {/* Song header */}
-      <div className="absolute top-[88px] left-4 right-4 flex items-center gap-3 h-[72px]">
-        <Cover variant={song.cover ?? 'default'} size={56} />
-        <div className="flex-1 min-w-0">
-          <h1 className="text-[18px] font-medium leading-tight truncate">{song.title}</h1>
-          <div className="flex items-center gap-1.5 mt-1">
-            <span className="text-xs text-text/60 truncate">{song.artist}</span>
+      <div className="absolute top-[88px] left-4 right-4">
+        {/* Row 1: cover + title/artist + heart */}
+        <div className="flex items-center gap-3 h-[56px]">
+          <Cover variant={song.cover ?? 'default'} size={56} />
+          <div className="flex-1 min-w-0">
+            <h1 className="text-[18px] font-medium leading-tight truncate">{song.title}</h1>
+            <div className="text-xs text-text/60 truncate mt-0.5">{song.artist}</div>
+          </div>
+          <button
+            onClick={() => {
+              if (isSaved) {
+                storage.removeSavedSong(song.id);
+                setIsSaved(false);
+                setCategories(storage.getCategories());
+                showToast('Removed from library');
+              } else {
+                setSaveSheetOpen(true);
+              }
+            }}
+            aria-label={isSaved ? 'Remove from library' : 'Save'}
+            className={`w-[42px] h-[42px] rounded-full border flex items-center justify-center transition-colors flex-shrink-0 ${
+              isSaved ? 'border-amber bg-amber/15' : 'border-text/15 bg-transparent'
+            }`}
+          >
+            <Heart
+              size={20}
+              strokeWidth={2}
+              className={isSaved ? 'text-amber' : 'text-text'}
+              fill={isSaved ? '#FFD89A' : 'none'}
+            />
+          </button>
+        </div>
+
+        {/* Row 2: service buttons + capo (capo right-aligned with space) */}
+        <div className="flex items-center gap-2 mt-3 ml-[68px]">
+          <button
+            onClick={() =>
+              window.open(
+                `https://music.apple.com/search?term=${encodeURIComponent(song.title + ' ' + song.artist)}`,
+                '_blank'
+              )
+            }
+            aria-label="Open in Apple Music"
+            className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: 'linear-gradient(135deg, #FA233B, #FB5C74)' }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M9 18V5l12-2v13" />
+              <circle cx="6" cy="18" r="3" fill="white" stroke="none" />
+              <circle cx="18" cy="16" r="3" fill="white" stroke="none" />
+            </svg>
+          </button>
+          <button
+            onClick={() =>
+              window.open(
+                `https://open.spotify.com/search/${encodeURIComponent(song.title + ' ' + song.artist)}`,
+                '_blank'
+              )
+            }
+            aria-label="Open in Spotify"
+            className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: '#1DB954' }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+              <path d="M5 9c4.5-2 9.5-2 14 0" />
+              <path d="M6.5 13c3.5-1.5 7.5-1.5 11 0" />
+              <path d="M8 16.5c2.5-1 5.5-1 8 0" />
+            </svg>
+          </button>
+
+          {/* Capo pill — right aligned for breathing room */}
+          <div ref={capoRef} className="ml-auto relative">
             <button
-              onClick={() => window.open(`https://music.apple.com/search?term=${encodeURIComponent(song.title + ' ' + song.artist)}`, '_blank')}
-              aria-label="Apple Music"
-              className="w-5 h-5 rounded-full bg-text/[0.08] flex items-center justify-center text-text/70 text-[8px] font-bold"
+              onClick={() => setCapoOpen(o => !o)}
+              className={`flex items-center gap-1.5 px-3 h-9 rounded-2xl border ${
+                capoFret === 0
+                  ? 'bg-text/[0.05] border-text/[0.12] text-text/70'
+                  : 'bg-amber/15 border-amber/40 text-amber'
+              }`}
             >
-              ♪
-            </button>
-            <button
-              onClick={() => window.open(`https://open.spotify.com/search/${encodeURIComponent(song.title + ' ' + song.artist)}`, '_blank')}
-              aria-label="Spotify"
-              className="w-5 h-5 rounded-full bg-text/[0.08] flex items-center justify-center text-text/70 text-[8px] font-bold"
-            >
-              S
-            </button>
-            {song.capo ? (
-              <span className="px-1.5 py-0.5 rounded-md bg-amber/15 text-amber text-[9px] font-semibold tracking-wider">
-                CAPO {song.capo}
+              <span className="text-[11px] font-semibold tracking-wider uppercase">
+                {capoFret === 0 ? 'No capo' : `Capo ${capoFret}`}
               </span>
-            ) : null}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            {capoOpen && (
+              <div className="absolute top-[calc(100%+6px)] right-0 z-40 w-[210px] bg-bg-surface border border-text/10 rounded-xl shadow-sheet p-2.5">
+                <div className="text-[10px] uppercase tracking-wider text-text/50 font-medium mb-2 px-1">
+                  Capo position
+                </div>
+                <div className="grid grid-cols-6 gap-1 mb-2">
+                  {[0, 1, 2, 3, 4, 5].map(f => (
+                    <button
+                      key={f}
+                      onClick={() => {
+                        setCapoFret(f);
+                        setCapoOpen(false);
+                      }}
+                      className={`h-8 rounded-md text-xs font-medium tabular-nums flex items-center justify-center ${
+                        f === capoFret
+                          ? 'bg-amber text-bg-primary'
+                          : 'bg-text/[0.05] text-text border border-text/[0.08]'
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-text/45 leading-relaxed px-1">
+                  {capoFret === originalCapo
+                    ? 'Original — chords as written.'
+                    : capoFret === 0
+                    ? `No capo — names shown ${capoSemitoneShift > 0 ? 'higher' : 'lower'} than the recording.`
+                    : `Capo on fret ${capoFret} — chord names retransposed.`}
+                </p>
+              </div>
+            )}
           </div>
         </div>
-        <button
-          onClick={() => {
-            if (isSaved) {
-              storage.removeSavedSong(song.id);
-              setIsSaved(false);
-              setCategories(storage.getCategories());
-              showToast('Removed from library');
-            } else {
-              setSaveSheetOpen(true);
-            }
-          }}
-          aria-label={isSaved ? 'Remove from library' : 'Save'}
-          className={`w-[42px] h-[42px] rounded-full border flex items-center justify-center transition-colors ${
-            isSaved ? 'border-amber bg-amber/15' : 'border-text/15 bg-transparent'
-          }`}
-        >
-          <Heart
-            size={20}
-            strokeWidth={2}
-            className={isSaved ? 'text-amber fill-amber' : 'text-text'}
-            fill={isSaved ? '#FFD89A' : 'none'}
-          />
-        </button>
       </div>
 
       {/* Controls row: Key | Position | Hand */}
-      <div className="absolute top-[178px] left-4 right-4 flex gap-2 h-9">
+      <div className="absolute top-[208px] left-4 right-4 flex gap-2 h-9">
         <Dropdown
           label="KEY"
           value={keyValue}
@@ -204,7 +309,7 @@ export default function ChordPage() {
           label="POS"
           value={position}
           onChange={setPosition}
-          options={['1', '2', '3', '4'].map(p => ({ value: p, label: `Position ${p}` }))}
+          options={positionOptions}
           className="flex-1"
         />
         <SegmentedControl
@@ -217,13 +322,17 @@ export default function ChordPage() {
       </div>
 
       {/* Section selector */}
-      <div className="absolute top-[230px] left-0 right-0 h-9 px-4 flex gap-1.5 overflow-x-auto no-scrollbar">
+      <div className="absolute top-[260px] left-0 right-0 h-9 px-4 flex gap-1.5 overflow-x-auto no-scrollbar">
         {song.sections.map(s => {
           const active = s.name === selectedSection;
           return (
             <button
               key={s.name}
-              onClick={() => setSelectedSection(s.name)}
+              onClick={() => {
+                setSelectedSection(s.name);
+                // reset position to 1 in case new section has fewer voicings
+                setPosition('1');
+              }}
               className={`flex-shrink-0 px-3.5 h-9 rounded-full text-xs font-medium whitespace-nowrap ${
                 active ? 'bg-amber text-bg-primary' : 'bg-transparent text-text border border-text/[0.12]'
               }`}
@@ -235,7 +344,7 @@ export default function ChordPage() {
       </div>
 
       {/* View tabs */}
-      <div className="absolute top-[280px] left-4 right-4">
+      <div className="absolute top-[310px] left-4 right-4">
         <div className="flex bg-text/[0.04] border border-text/10 rounded-[14px] p-[3px] gap-[1px] h-9">
           {VIEW_OPTIONS.map(v => {
             const active = v === view;
@@ -257,7 +366,7 @@ export default function ChordPage() {
       </div>
 
       {/* Strum row */}
-      <div className="absolute top-[330px] left-4 right-4 h-9 flex items-center gap-2">
+      <div className="absolute top-[360px] left-4 right-4 h-9 flex items-center gap-2">
         <span className="text-[10px] uppercase tracking-wider text-text/50 font-medium">Strum</span>
         <div className="flex items-center gap-[3px]">
           {strumPattern.map((d, i) => (
@@ -287,25 +396,29 @@ export default function ChordPage() {
         </div>
       </div>
 
-      {/* Body — depends on view */}
-      <div className="absolute top-[380px] bottom-[110px] left-0 right-0 px-4 overflow-y-auto no-scrollbar">
+      {/* Body */}
+      <div className="absolute top-[410px] bottom-[110px] left-0 right-0 px-4 overflow-y-auto no-scrollbar">
         {view === 'Diagrams' && (
           <div className="grid grid-cols-2 gap-3 pb-4">
-            {currentSection.chords.map((chord: Chord, i: number) => (
-              <ChordCard
-                key={`${chord.name}-${i}`}
-                name={chord.name}
-                sequenceNumber={i + 1}
-                positions={chord.positions}
-                openStrings={chord.openStrings}
-                mutedStrings={chord.mutedStrings}
-                isPlaying={playingChord === chord.name}
-                onClick={() => {
-                  setPlayingChord(chord.name);
-                  setTimeout(() => setPlayingChord(null), 800);
-                }}
-              />
-            ))}
+            {currentSection.chords.map((chord, i) => {
+              const voicing = getVoicing(chord);
+              return (
+                <ChordCard
+                  key={`${chord.name}-${i}-${position}-${capoFret}`}
+                  name={displayName(chord.name)}
+                  sequenceNumber={i + 1}
+                  positions={voicing.positions}
+                  openStrings={voicing.openStrings}
+                  mutedStrings={voicing.mutedStrings}
+                  baseFret={voicing.baseFret}
+                  isPlaying={playingChord === chord.name}
+                  onClick={() => {
+                    setPlayingChord(chord.name);
+                    setTimeout(() => setPlayingChord(null), 800);
+                  }}
+                />
+              );
+            })}
           </div>
         )}
 
@@ -316,8 +429,16 @@ export default function ChordPage() {
               <div key={i} className="flex flex-col gap-0.5">
                 <div className="flex gap-2 text-[10px] font-semibold text-amber tabular-nums">
                   {line.chords.map((c, j) => (
-                    <span key={j} style={{ marginLeft: j === 0 ? `${c.at * 6}px` : `${(c.at - line.chords[j - 1].at - 1) * 6}px` }}>
-                      {c.chord}
+                    <span
+                      key={j}
+                      style={{
+                        marginLeft:
+                          j === 0
+                            ? `${c.at * 6}px`
+                            : `${(c.at - line.chords[j - 1].at - 1) * 6}px`,
+                      }}
+                    >
+                      {displayName(c.chord)}
                     </span>
                   ))}
                 </div>
@@ -345,7 +466,7 @@ export default function ChordPage() {
         )}
       </div>
 
-      {/* Transport bar */}
+      {/* Transport */}
       <div className="absolute bottom-[18px] left-4 right-4 h-[74px] flex items-center justify-between px-3 bg-text/[0.03] border border-text/[0.08] rounded-2xl backdrop-blur-md z-10">
         <button
           onClick={() => setIsPlaying(p => !p)}

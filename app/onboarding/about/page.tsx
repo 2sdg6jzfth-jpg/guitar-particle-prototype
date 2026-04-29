@@ -14,6 +14,10 @@ const HAND = ['Right', 'Left'] as const;
 const YEARS = ['< 1 year', '1–3 years', '3–10 years', '10+ years'] as const;
 const GUITAR = ['Acoustic', 'Electric', 'Classical'] as const;
 const STRUM = ['Simple', 'Real'] as const;
+const GENRES = [
+  'Rock', 'Indie', 'Folk', 'Pop', 'Country', 'Jazz',
+  'Blues', 'Metal', 'Hip-hop', 'Electronic', 'Classical', 'R&B',
+] as const;
 
 export default function AboutPage() {
   const router = useRouter();
@@ -21,6 +25,11 @@ export default function AboutPage() {
   const [years, setYears] = useState<(typeof YEARS)[number]>('< 1 year');
   const [guitar, setGuitar] = useState<(typeof GUITAR)[number]>('Acoustic');
   const [strum, setStrum] = useState<(typeof STRUM)[number]>('Simple');
+  const [genres, setGenres] = useState<string[]>([]);
+
+  const toggleGenre = (g: string) => {
+    setGenres(prev => (prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]));
+  };
 
   const handleContinue = () => {
     if (typeof window !== 'undefined') {
@@ -33,6 +42,7 @@ export default function AboutPage() {
           yearsPlaying: years,
           guitarType: guitar,
           defaultStrum: strum,
+          genres,
         })
       );
     }
@@ -57,7 +67,7 @@ export default function AboutPage() {
           Tell us about your playing
         </h1>
         <p className="text-sm text-text/55 leading-relaxed">
-          We&apos;ll tailor chord voicings and strum patterns to fit.
+          We&apos;ll tailor chord voicings, strum patterns, and recommendations.
         </p>
       </div>
 
@@ -73,6 +83,26 @@ export default function AboutPage() {
         </Group>
         <Group label="Default strum">
           <PillRow options={STRUM} value={strum} onChange={setStrum} />
+        </Group>
+        <Group label={`Music you like${genres.length > 0 ? ` · ${genres.length}` : ''}`}>
+          <div className="flex flex-wrap gap-1.5">
+            {GENRES.map(g => {
+              const sel = genres.includes(g);
+              return (
+                <button
+                  key={g}
+                  onClick={() => toggleGenre(g)}
+                  className={`px-3 h-8 text-[11px] font-medium rounded-2xl ${
+                    sel
+                      ? 'bg-amber text-bg-primary'
+                      : 'bg-text/[0.04] border border-text/[0.1] text-text'
+                  }`}
+                >
+                  {g}
+                </button>
+              );
+            })}
+          </div>
         </Group>
       </div>
 
@@ -117,7 +147,9 @@ function PillRow<T extends string>({
         <button
           key={o}
           onClick={() => onChange(o)}
-          className={`${small ? 'px-3 h-8 text-[11px]' : 'px-3.5 h-9 text-xs'} rounded-2xl font-medium ${
+          className={`${
+            small ? 'px-3 h-8 text-[11px]' : 'px-3.5 h-9 text-xs'
+          } rounded-2xl font-medium ${
             value === o
               ? 'bg-amber text-bg-primary'
               : 'bg-text/[0.04] border border-text/[0.1] text-text'

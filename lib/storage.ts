@@ -40,6 +40,11 @@ export const storage = {
     if (!isBrowser()) return;
     localStorage.setItem(KEYS.user, JSON.stringify(user));
   },
+  updateUser(patch: Record<string, unknown>) {
+    if (!isBrowser()) return;
+    const current = storage.getUser() ?? {};
+    storage.saveUser({ ...current, ...patch });
+  },
   getUser(): Record<string, unknown> | null {
     if (!isBrowser()) return null;
     const v = localStorage.getItem(KEYS.user);

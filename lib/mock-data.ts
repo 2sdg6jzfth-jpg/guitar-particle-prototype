@@ -1,20 +1,26 @@
+// Frets in `positions` are RELATIVE to the diagram window's top fret.
+// baseFret 1 = standard open-position diagram (nut at top).
+// baseFret 7 = window shows frets 7–10; fret:1 in the data renders at the top of that window.
+
 export type ChordPosition = {
-  string: number; // 1 (high E) – 6 (low E)
-  fret: number;
+  string: number; // 1 (high e) – 6 (low E)
+  fret: number;   // 1–4, relative to baseFret
   finger?: number;
+};
+
+export type ChordVoicing = {
+  positions: ChordPosition[];
+  openStrings: number[];
+  mutedStrings: number[];
+  baseFret?: number; // default 1
 };
 
 export type Chord = {
   name: string;
-  positions: ChordPosition[];
-  openStrings: number[];
-  mutedStrings: number[];
+  voicings: ChordVoicing[];
 };
 
-export type Section = {
-  name: string;
-  chords: Chord[];
-};
+export type Section = { name: string; chords: Chord[] };
 
 export type Song = {
   id: string;
@@ -31,56 +37,150 @@ export type Song = {
   simpleStrumPattern: ('D' | 'U' | '-')[];
 };
 
-// Chord library (canonical Wonderwall voicings, capo 2)
+// ---- Chord library (corrected voicings) ----
+
 const CHORDS: Record<string, Chord> = {
+  // Em7 = 0 2 0 0 0 0  (one finger on A string fret 2; everything else open)
   Em7: {
     name: 'Em7',
-    positions: [
-      { string: 5, fret: 2, finger: 2 },
-      { string: 4, fret: 2, finger: 3 },
+    voicings: [
+      {
+        positions: [{ string: 5, fret: 2, finger: 2 }],
+        openStrings: [1, 2, 3, 4, 6],
+        mutedStrings: [],
+      },
+      // Position 2: x 7 9 7 8 7 — Em7 barre at 7th fret
+      {
+        baseFret: 7,
+        positions: [
+          { string: 5, fret: 1, finger: 1 },
+          { string: 4, fret: 3, finger: 4 },
+          { string: 3, fret: 1, finger: 1 },
+          { string: 2, fret: 2, finger: 2 },
+          { string: 1, fret: 1, finger: 1 },
+        ],
+        openStrings: [],
+        mutedStrings: [6],
+      },
     ],
-    openStrings: [1, 2, 3, 6],
-    mutedStrings: [],
   },
+
+  // G = 3 2 0 0 0 3
   G: {
     name: 'G',
-    positions: [
-      { string: 6, fret: 3, finger: 2 },
-      { string: 5, fret: 2, finger: 1 },
-      { string: 1, fret: 3, finger: 3 },
+    voicings: [
+      {
+        positions: [
+          { string: 6, fret: 3, finger: 2 },
+          { string: 5, fret: 2, finger: 1 },
+          { string: 1, fret: 3, finger: 3 },
+        ],
+        openStrings: [2, 3, 4],
+        mutedStrings: [],
+      },
+      // Position 2: 3 5 5 4 3 3 — G barre at 3rd fret (E shape)
+      {
+        baseFret: 3,
+        positions: [
+          { string: 6, fret: 1, finger: 1 },
+          { string: 5, fret: 3, finger: 3 },
+          { string: 4, fret: 3, finger: 4 },
+          { string: 3, fret: 2, finger: 2 },
+          { string: 2, fret: 1, finger: 1 },
+          { string: 1, fret: 1, finger: 1 },
+        ],
+        openStrings: [],
+        mutedStrings: [],
+      },
     ],
-    openStrings: [2, 3, 4],
-    mutedStrings: [],
   },
+
+  // Dsus4 = x x 0 2 3 3
   Dsus4: {
     name: 'Dsus4',
-    positions: [
-      { string: 3, fret: 2, finger: 1 },
-      { string: 2, fret: 3, finger: 2 },
-      { string: 1, fret: 3, finger: 3 },
+    voicings: [
+      {
+        positions: [
+          { string: 3, fret: 2, finger: 1 },
+          { string: 2, fret: 3, finger: 3 },
+          { string: 1, fret: 3, finger: 4 },
+        ],
+        openStrings: [4],
+        mutedStrings: [5, 6],
+      },
+      // Position 2: x 5 7 7 8 5 — Dsus4 at 5th fret
+      {
+        baseFret: 5,
+        positions: [
+          { string: 5, fret: 1, finger: 1 },
+          { string: 4, fret: 3, finger: 3 },
+          { string: 3, fret: 3, finger: 4 },
+          { string: 2, fret: 4, finger: 4 },
+          { string: 1, fret: 1, finger: 1 },
+        ],
+        openStrings: [],
+        mutedStrings: [6],
+      },
     ],
-    openStrings: [4],
-    mutedStrings: [5, 6],
   },
+
+  // A7sus4 = x 0 2 0 3 0
   A7sus4: {
     name: 'A7sus4',
-    positions: [
-      { string: 4, fret: 2, finger: 2 },
-      { string: 2, fret: 3, finger: 3 },
+    voicings: [
+      {
+        positions: [
+          { string: 4, fret: 2, finger: 2 },
+          { string: 2, fret: 3, finger: 3 },
+        ],
+        openStrings: [1, 3, 5],
+        mutedStrings: [6],
+      },
+      // Position 2: 5 7 5 7 5 5 — A7sus4 barre at 5th fret
+      {
+        baseFret: 5,
+        positions: [
+          { string: 6, fret: 1, finger: 1 },
+          { string: 5, fret: 3, finger: 3 },
+          { string: 4, fret: 1, finger: 1 },
+          { string: 3, fret: 3, finger: 4 },
+          { string: 2, fret: 1, finger: 1 },
+          { string: 1, fret: 1, finger: 1 },
+        ],
+        openStrings: [],
+        mutedStrings: [],
+      },
     ],
-    openStrings: [1, 3, 5],
-    mutedStrings: [6],
   },
+
+  // Cadd9 = x 3 2 0 3 3
   Cadd9: {
     name: 'Cadd9',
-    positions: [
-      { string: 5, fret: 3, finger: 2 },
-      { string: 4, fret: 2, finger: 1 },
-      { string: 2, fret: 3, finger: 3 },
-      { string: 1, fret: 3, finger: 4 },
+    voicings: [
+      {
+        positions: [
+          { string: 5, fret: 3, finger: 3 },
+          { string: 4, fret: 2, finger: 2 },
+          { string: 2, fret: 3, finger: 4 },
+          { string: 1, fret: 3, finger: 4 },
+        ],
+        openStrings: [3],
+        mutedStrings: [6],
+      },
+      // Position 2: x 3 5 5 5 3 — Cadd9 barre at 3rd fret
+      {
+        baseFret: 3,
+        positions: [
+          { string: 5, fret: 1, finger: 1 },
+          { string: 4, fret: 3, finger: 2 },
+          { string: 3, fret: 3, finger: 3 },
+          { string: 2, fret: 3, finger: 4 },
+          { string: 1, fret: 1, finger: 1 },
+        ],
+        openStrings: [],
+        mutedStrings: [6],
+      },
     ],
-    openStrings: [3],
-    mutedStrings: [6],
   },
 };
 
@@ -122,6 +222,26 @@ export const wonderwall: Song = {
   simpleStrumPattern: ['D', 'D', 'D', 'D'],
 };
 
+// ---- Chord-name transposition (for capo changes) ----
+
+const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+// Simple flat-to-sharp normalizer
+const FLAT_TO_SHARP: Record<string, string> = {
+  'Db': 'C#', 'Eb': 'D#', 'Gb': 'F#', 'Ab': 'G#', 'Bb': 'A#',
+  'Cb': 'B', 'Fb': 'E',
+};
+
+export function transposeChordName(name: string, semitones: number): string {
+  const match = name.match(/^([A-G][#b]?)(.*)$/);
+  if (!match) return name;
+  const [, root, suffix] = match;
+  const normalized = FLAT_TO_SHARP[root] ?? root;
+  const idx = NOTES.indexOf(normalized);
+  if (idx === -1) return name;
+  const newIdx = ((idx + semitones) % 12 + 12) % 12;
+  return NOTES[newIdx] + suffix;
+}
+
 export const trendingSongs = [
   { id: 'stick-season', title: 'Stick Season', artist: 'Noah Kahan', cover: 'gradient-1' },
   { id: 'vampire', title: 'Vampire', artist: 'Olivia Rodrigo', cover: 'gradient-2' },
@@ -151,7 +271,6 @@ export const defaultLibraryCategories = [
   { id: 'acoustic-set', name: 'Acoustic set', count: 0 },
 ];
 
-// All searchable songs (used in search results)
 export const allSongs = [
   { id: 'wonderwall', title: 'Wonderwall', artist: 'Oasis', album: "(What's the Story) Morning Glory?" },
   { id: 'champagne', title: 'Champagne Supernova', artist: 'Oasis', album: "(What's the Story) Morning Glory?" },
@@ -164,4 +283,4 @@ export const allSongs = [
   { id: 'wagon-wheel', title: 'Wagon Wheel', artist: 'Old Crow Medicine Show', album: 'OCMS' },
 ];
 
-export const CHROMATIC_KEYS = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+export const CHROMATIC_KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];

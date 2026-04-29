@@ -8,6 +8,7 @@ type Props = {
   positions: { string: number; fret: number; finger?: number }[];
   openStrings: number[];
   mutedStrings: number[];
+  baseFret?: number;
   isPlaying?: boolean;
   onClick?: () => void;
 };
@@ -18,6 +19,7 @@ export function ChordCard({
   positions,
   openStrings,
   mutedStrings,
+  baseFret,
   isPlaying,
   onClick,
 }: Props) {
@@ -42,13 +44,16 @@ export function ChordCard({
 
       {isPlaying && <SoundBars />}
 
-      <span
-        className={`text-sm font-medium mb-1 ${isPlaying ? 'text-amber' : 'text-text'}`}
-      >
+      <span className={`text-sm font-medium mb-1 ${isPlaying ? 'text-amber' : 'text-text'}`}>
         {name}
       </span>
 
-      <ChordDiagram positions={positions} openStrings={openStrings} mutedStrings={mutedStrings} />
+      <ChordDiagram
+        positions={positions}
+        openStrings={openStrings}
+        mutedStrings={mutedStrings}
+        baseFret={baseFret}
+      />
     </button>
   );
 }
