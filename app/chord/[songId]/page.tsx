@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Heart, Play, Pause, Minus, Plus, RotateCcw } from 'lucide-react';
+import {
+  Heart, Play, Pause, Minus, Plus, RotateCcw,
+  ChevronUp, ChevronDown, Maximize2, Minimize2,
+} from 'lucide-react';
 import { CrossLitHalos } from '@/components/cross-lit-halos';
 import { StatusBar } from '@/components/status-bar';
 import { HomeIndicator } from '@/components/home-indicator';
@@ -50,6 +53,10 @@ export default function ChordPage() {
   const [toast, setToast] = useState<string | null>(null);
   const playRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // View modes
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  const [fullScreen, setFullScreen] = useState(false);
+
   useEffect(() => {
     setIsSaved(storage.isSongSaved(song.id));
     setCategories(storage.getCategories());
@@ -59,7 +66,6 @@ export default function ChordPage() {
     if (playRef.current) clearInterval(playRef.current);
   }, []);
 
-  // Close capo popover on outside click
   useEffect(() => {
     const h = (e: MouseEvent) => {
       if (capoRef.current && !capoRef.current.contains(e.target as Node)) setCapoOpen(false);
@@ -78,18 +84,13 @@ export default function ChordPage() {
     [selectedSection, song.sections]
   );
 
-  // Capo transposition: how many semitones to shift display names
   const capoSemitoneShift = capoFret - originalCapo;
   const displayName = (chordName: string) =>
     capoSemitoneShift === 0 ? chordName : transposeChordName(chordName, capoSemitoneShift);
 
-  // Pick voicing for a chord based on the position state
   const positionIdx = parseInt(position, 10) - 1;
-  const getVoicing = (chord: Chord) => {
-    return chord.voicings[positionIdx] ?? chord.voicings[0];
-  };
+  const getVoicing = (chord: Chord) => chord.voicings[positionIdx] ?? chord.voicings[0];
 
-  // Available positions = max # of voicings across the section's chords
   const maxVoicings = Math.max(...currentSection.chords.map(c => c.voicings.length));
   const positionOptions = Array.from({ length: maxVoicings }, (_, i) => ({
     value: String(i + 1),
@@ -98,7 +99,6 @@ export default function ChordPage() {
 
   const strumPattern = strumMode === 'Real' ? song.realStrumPattern : song.simpleStrumPattern;
 
-  // Auto-cycle playing chord during play
   useEffect(() => {
     if (!isPlaying) {
       if (playRef.current) clearInterval(playRef.current);
@@ -152,12 +152,148 @@ export default function ChordPage() {
     setCategories(storage.getCategories());
   };
 
+  // Body content (renders different sizes for fullscreen)
+  const renderBody = (large: boolean) => {
+    if (view === 'Diagrams') {
+      return (
+        <div className={`grid grid-cols-2 ${large ? 'gap-4' : 'gap-3'} pb-4`}>
+          {currentSection.chords.map((chord, i) => {
+            const voicing = getVoicing(chord);
+            return (
+              <ChordCard
+                key={`${chord.name}-${i}-${position}-${capoFret}`}
+                name={displayName(chord.name)}
+                sequenceNumber={i + 1}
+                positions={voicing.positions}
+                openStrings={voicing.openStrings}
+                mutedStrings={voicing.mutedStrings}
+                baseFret={voicing.baseFret}
+                size={large ? 'lg' : 'md'}
+                isPlaying={playingChord === chord.name}
+                onClick={() => {
+                  setPlayingChord(chord.name);
+                  setTimeout(() => setPlayingChord(null), 800);
+                }}
+              />
+            );
+          })}
+        </div>
+      );
+    }
+    if (view === 'Lyrics') {
+      return (
+        <div className="flex flex-col gap-3 pb-4">
+          <div className="text-[10px] uppercase tracking-wider text-text/45 font-medium">
+            {currentSection.name}
+          </div>
+          {song.lyrics.map((line, i) => (
+            <div key={i} className="flex flex-col gap-0.5">
+              <div
+                className={`flex gap-2 font-semibold text-amber tabular-nums ${
+                  large ? 'text-xs' : 'text-[10px]'
+                }`}
+              >
+                {line.chords.map((c, j) => (
+                  <span
+                    key={j}
+                    style={{
+                      marginLeft:
+                        j === 0
+                          ? `${c.at * (large ? 8 : 6)}px`
+                          : `${(c.at - line.chords[j - 1].at - 1) * (large ? 8 : 6)}px`,
+                    }}
+                  >
+                    {displayName(c.chord)}
+                  </span>
+                ))}
+              </div>
+              <div className={`text-text leading-relaxed ${large ? 'text-base' : 'text-[13px]'}`}>
+                {line.line}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return (
+      <div
+        className={`flex flex-col gap-2 pb-4 font-mono text-text/85 leading-relaxed ${
+          large ? 'text-[14px]' : 'text-[11px]'
+        }`}
+      >
+        <div className="text-[10px] uppercase tracking-wider text-text/45 font-medium font-sans mb-2">
+          {currentSection.name}
+        </div>
+        {[
+          'e|--3-----3-----3-----3-----|',
+          'B|--3-----3-----3-----3-----|',
+          'G|--0-----0-----2-----2-----|',
+          'D|--0-----0-----0-----2-----|',
+          'A|--2-----2-----x-----0-----|',
+          'E|--0-----3-----x-----x-----|',
+        ].map((row, i) => (
+          <div key={i} className="tabular-nums">
+            {row}
+          </div>
+        ))}
+        <div className="mt-3 text-[10px] text-text/45 font-sans">
+          Tabs are simplified for the prototype.
+        </div>
+      </div>
+    );
+  };
+
+  // ============== FULLSCREEN MODE ==============
+  if (fullScreen) {
+    return (
+      <>
+        <CrossLitHalos intensity="low" />
+
+        {/* Top bar: minimize + title */}
+        <div className="absolute top-4 left-0 right-0 flex items-center justify-between px-3.5 h-12 z-20">
+          <button
+            onClick={() => setFullScreen(false)}
+            aria-label="Exit full screen"
+            className="w-10 h-10 flex items-center justify-center"
+          >
+            <Minimize2 size={22} strokeWidth={2} className="text-text" />
+          </button>
+          <h2 className="text-sm font-medium text-text truncate max-w-[200px]">{song.title}</h2>
+          <div className="w-10" />
+        </div>
+
+        {/* Body — fills nearly the whole frame */}
+        <div className="absolute top-[64px] bottom-[112px] left-0 right-0 px-4 overflow-y-auto no-scrollbar">
+          {renderBody(true)}
+        </div>
+
+        {/* Floating play/pause */}
+        <button
+          onClick={() => setIsPlaying(p => !p)}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
+          className="absolute bottom-7 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-amber flex items-center justify-center shadow-cta-amber z-20"
+          style={{ boxShadow: '0 12px 32px rgba(255,216,154,0.3)' }}
+        >
+          {isPlaying ? (
+            <Pause size={28} strokeWidth={2} fill="#0A0E18" className="text-bg-primary" />
+          ) : (
+            <Play size={28} strokeWidth={2} fill="#0A0E18" className="text-bg-primary ml-0.5" />
+          )}
+        </button>
+
+        <HomeIndicator />
+
+        <Toast message={toast} />
+      </>
+    );
+  }
+
+  // ============== NORMAL MODE (default + collapsed) ==============
   return (
     <>
       <CrossLitHalos intensity="low" />
       <StatusBar />
 
-      {/* Top back arrow */}
       <button
         onClick={() => router.back()}
         aria-label="Back"
@@ -170,7 +306,6 @@ export default function ChordPage() {
 
       {/* Song header */}
       <div className="absolute top-[88px] left-4 right-4">
-        {/* Row 1: cover + title/artist + heart */}
         <div className="flex items-center gap-3 h-[56px]">
           <Cover variant={song.cover ?? 'default'} size={56} />
           <div className="flex-1 min-w-0">
@@ -202,7 +337,6 @@ export default function ChordPage() {
           </button>
         </div>
 
-        {/* Row 2: service buttons + capo (capo right-aligned with space) */}
         <div className="flex items-center gap-2 mt-3 ml-[68px]">
           <button
             onClick={() =>
@@ -239,7 +373,6 @@ export default function ChordPage() {
             </svg>
           </button>
 
-          {/* Capo pill — right aligned for breathing room */}
           <div ref={capoRef} className="ml-auto relative">
             <button
               onClick={() => setCapoOpen(o => !o)}
@@ -252,9 +385,7 @@ export default function ChordPage() {
               <span className="text-[11px] font-semibold tracking-wider uppercase">
                 {capoFret === 0 ? 'No capo' : `Capo ${capoFret}`}
               </span>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+              <ChevronDown size={10} strokeWidth={3} />
             </button>
             {capoOpen && (
               <div className="absolute top-[calc(100%+6px)] right-0 z-40 w-[210px] bg-bg-surface border border-text/10 rounded-xl shadow-sheet p-2.5">
@@ -292,178 +423,153 @@ export default function ChordPage() {
         </div>
       </div>
 
-      {/* Controls row: Key | Position | Hand */}
-      <div className="absolute top-[208px] left-4 right-4 flex gap-2 h-9">
-        <Dropdown
-          label="KEY"
-          value={keyValue}
-          onChange={setKeyValue}
-          options={CHROMATIC_KEYS.map(k => ({
-            value: k,
-            label: k,
-            suffix: k === song.originalKey ? '(original)' : undefined,
-          }))}
-          className="flex-1"
-        />
-        <Dropdown
-          label="POS"
-          value={position}
-          onChange={setPosition}
-          options={positionOptions}
-          className="flex-1"
-        />
-        <SegmentedControl
-          options={HAND_OPTIONS}
-          value={hand}
-          onChange={setHand}
-          size="sm"
-          className="w-[64px] h-9"
-        />
-      </div>
+      {/* ===== CONTROLS (default mode) ===== */}
+      {!controlsCollapsed && (
+        <>
+          <div className="absolute top-[208px] left-4 right-4 flex gap-2 h-9">
+            <Dropdown
+              label="KEY"
+              value={keyValue}
+              onChange={setKeyValue}
+              options={CHROMATIC_KEYS.map(k => ({
+                value: k,
+                label: k,
+                suffix: k === song.originalKey ? '(original)' : undefined,
+              }))}
+              className="flex-1"
+            />
+            <Dropdown
+              label="POS"
+              value={position}
+              onChange={setPosition}
+              options={positionOptions}
+              className="flex-1"
+            />
+            <SegmentedControl
+              options={HAND_OPTIONS}
+              value={hand}
+              onChange={setHand}
+              size="sm"
+              className="w-[64px] h-9"
+            />
+          </div>
 
-      {/* Section selector */}
-      <div className="absolute top-[260px] left-0 right-0 h-9 px-4 flex gap-1.5 overflow-x-auto no-scrollbar">
-        {song.sections.map(s => {
-          const active = s.name === selectedSection;
-          return (
-            <button
-              key={s.name}
-              onClick={() => {
-                setSelectedSection(s.name);
-                // reset position to 1 in case new section has fewer voicings
-                setPosition('1');
-              }}
-              className={`flex-shrink-0 px-3.5 h-9 rounded-full text-xs font-medium whitespace-nowrap ${
-                active ? 'bg-amber text-bg-primary' : 'bg-transparent text-text border border-text/[0.12]'
-              }`}
-            >
-              {s.name}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* View tabs */}
-      <div className="absolute top-[310px] left-4 right-4">
-        <div className="flex bg-text/[0.04] border border-text/10 rounded-[14px] p-[3px] gap-[1px] h-9">
-          {VIEW_OPTIONS.map(v => {
-            const active = v === view;
-            const isLocked = v === 'Tabs' && !storage.isPro();
-            return (
-              <button
-                key={v}
-                onClick={() => handleViewChange(v)}
-                className={`flex-1 px-3 text-xs font-medium rounded-[11px] transition-colors flex items-center justify-center gap-1 ${
-                  active ? 'bg-amber text-bg-primary' : 'bg-transparent text-text'
-                }`}
-              >
-                {v}
-                {isLocked && <span className="text-[9px] opacity-70">PRO</span>}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Strum row */}
-      <div className="absolute top-[360px] left-4 right-4 h-9 flex items-center gap-2">
-        <span className="text-[10px] uppercase tracking-wider text-text/50 font-medium">Strum</span>
-        <div className="flex items-center gap-[3px]">
-          {strumPattern.map((d, i) => (
-            <span key={i} className="flex items-center justify-center">
-              {d === 'D' ? (
-                <svg width="13" height="15" viewBox="0 0 13 15" fill="none" stroke="#FFD89A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="6.5" y1="2" x2="6.5" y2="13" />
-                  <polyline points="2 9 6.5 13 11 9" />
-                </svg>
-              ) : (
-                <svg width="11" height="13" viewBox="0 0 11 13" fill="none" stroke="#A8E9F4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" opacity="0.85">
-                  <line x1="5.5" y1="11" x2="5.5" y2="2" />
-                  <polyline points="2 5 5.5 2 9 5" />
-                </svg>
-              )}
-            </span>
-          ))}
-        </div>
-        <div className="ml-auto">
-          <SegmentedControl
-            options={STRUM_OPTIONS}
-            value={strumMode}
-            onChange={setStrumMode}
-            size="sm"
-            className="w-[112px] h-7"
-          />
-        </div>
-      </div>
-
-      {/* Body */}
-      <div className="absolute top-[410px] bottom-[110px] left-0 right-0 px-4 overflow-y-auto no-scrollbar">
-        {view === 'Diagrams' && (
-          <div className="grid grid-cols-2 gap-3 pb-4">
-            {currentSection.chords.map((chord, i) => {
-              const voicing = getVoicing(chord);
+          <div className="absolute top-[260px] left-0 right-0 h-9 px-4 flex gap-1.5 overflow-x-auto no-scrollbar">
+            {song.sections.map(s => {
+              const active = s.name === selectedSection;
               return (
-                <ChordCard
-                  key={`${chord.name}-${i}-${position}-${capoFret}`}
-                  name={displayName(chord.name)}
-                  sequenceNumber={i + 1}
-                  positions={voicing.positions}
-                  openStrings={voicing.openStrings}
-                  mutedStrings={voicing.mutedStrings}
-                  baseFret={voicing.baseFret}
-                  isPlaying={playingChord === chord.name}
+                <button
+                  key={s.name}
                   onClick={() => {
-                    setPlayingChord(chord.name);
-                    setTimeout(() => setPlayingChord(null), 800);
+                    setSelectedSection(s.name);
+                    setPosition('1');
                   }}
-                />
+                  className={`flex-shrink-0 px-3.5 h-9 rounded-full text-xs font-medium whitespace-nowrap ${
+                    active ? 'bg-amber text-bg-primary' : 'bg-transparent text-text border border-text/[0.12]'
+                  }`}
+                >
+                  {s.name}
+                </button>
               );
             })}
           </div>
-        )}
 
-        {view === 'Lyrics' && (
-          <div className="flex flex-col gap-3 pb-4">
-            <div className="text-[10px] uppercase tracking-wider text-text/45 font-medium">{currentSection.name}</div>
-            {song.lyrics.map((line, i) => (
-              <div key={i} className="flex flex-col gap-0.5">
-                <div className="flex gap-2 text-[10px] font-semibold text-amber tabular-nums">
-                  {line.chords.map((c, j) => (
-                    <span
-                      key={j}
-                      style={{
-                        marginLeft:
-                          j === 0
-                            ? `${c.at * 6}px`
-                            : `${(c.at - line.chords[j - 1].at - 1) * 6}px`,
-                      }}
-                    >
-                      {displayName(c.chord)}
-                    </span>
-                  ))}
-                </div>
-                <div className="text-[13px] text-text leading-relaxed">{line.line}</div>
-              </div>
-            ))}
+          <div className="absolute top-[310px] left-4 right-4">
+            <div className="flex bg-text/[0.04] border border-text/10 rounded-[14px] p-[3px] gap-[1px] h-9">
+              {VIEW_OPTIONS.map(v => {
+                const active = v === view;
+                const isLocked = v === 'Tabs' && !storage.isPro();
+                return (
+                  <button
+                    key={v}
+                    onClick={() => handleViewChange(v)}
+                    className={`flex-1 px-3 text-xs font-medium rounded-[11px] transition-colors flex items-center justify-center gap-1 ${
+                      active ? 'bg-amber text-bg-primary' : 'bg-transparent text-text'
+                    }`}
+                  >
+                    {v}
+                    {isLocked && <span className="text-[9px] opacity-70">PRO</span>}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        )}
 
-        {view === 'Tabs' && (
-          <div className="flex flex-col gap-2 pb-4 font-mono text-[11px] text-text/85 leading-relaxed">
-            <div className="text-[10px] uppercase tracking-wider text-text/45 font-medium font-sans mb-2">{currentSection.name}</div>
-            {[
-              'e|--3-----3-----3-----3-----|',
-              'B|--3-----3-----3-----3-----|',
-              'G|--0-----0-----2-----2-----|',
-              'D|--0-----0-----0-----2-----|',
-              'A|--2-----2-----x-----0-----|',
-              'E|--0-----3-----x-----x-----|',
-            ].map((row, i) => (
-              <div key={i} className="tabular-nums">{row}</div>
-            ))}
-            <div className="mt-3 text-[10px] text-text/45 font-sans">Tabs are simplified for the prototype.</div>
+          {/* Strum row + collapse/fullscreen toggles */}
+          <div className="absolute top-[360px] left-4 right-4 h-9 flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-text/50 font-medium">Strum</span>
+            <div className="flex items-center gap-[3px]">
+              {strumPattern.map((d, i) => (
+                <span key={i} className="flex items-center justify-center">
+                  {d === 'D' ? (
+                    <svg width="12" height="14" viewBox="0 0 13 15" fill="none" stroke="#FFD89A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="6.5" y1="2" x2="6.5" y2="13" />
+                      <polyline points="2 9 6.5 13 11 9" />
+                    </svg>
+                  ) : (
+                    <svg width="10" height="12" viewBox="0 0 11 13" fill="none" stroke="#A8E9F4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" opacity="0.85">
+                      <line x1="5.5" y1="11" x2="5.5" y2="2" />
+                      <polyline points="2 5 5.5 2 9 5" />
+                    </svg>
+                  )}
+                </span>
+              ))}
+            </div>
+            <SegmentedControl
+              options={STRUM_OPTIONS}
+              value={strumMode}
+              onChange={setStrumMode}
+              size="sm"
+              className="ml-auto w-[88px] h-7"
+            />
+            <button
+              onClick={() => setControlsCollapsed(true)}
+              aria-label="Collapse controls"
+              className="w-7 h-7 rounded-md bg-text/[0.05] border border-text/[0.1] flex items-center justify-center flex-shrink-0"
+            >
+              <ChevronUp size={14} strokeWidth={2.2} className="text-text/75" />
+            </button>
+            <button
+              onClick={() => setFullScreen(true)}
+              aria-label="Full screen"
+              className="w-7 h-7 rounded-md bg-text/[0.05] border border-text/[0.1] flex items-center justify-center flex-shrink-0"
+            >
+              <Maximize2 size={13} strokeWidth={2.2} className="text-text/75" />
+            </button>
           </div>
-        )}
+        </>
+      )}
+
+      {/* ===== COMPACT SUMMARY BAR (collapsed mode) ===== */}
+      {controlsCollapsed && (
+        <div className="absolute top-[208px] left-4 right-4 h-9 flex items-center gap-2">
+          <button
+            onClick={() => setControlsCollapsed(false)}
+            className="flex-1 flex items-center gap-2 bg-text/[0.04] border border-text/[0.07] rounded-xl px-3 h-9"
+          >
+            <ChevronDown size={14} strokeWidth={2.2} className="text-amber flex-shrink-0" />
+            <span className="text-xs text-text/75 truncate text-left">
+              <span className="font-medium text-text">{selectedSection}</span>
+              <span className="text-text/45"> · {view} · {strumMode}</span>
+            </span>
+          </button>
+          <button
+            onClick={() => setFullScreen(true)}
+            aria-label="Full screen"
+            className="w-9 h-9 rounded-md bg-text/[0.05] border border-text/[0.1] flex items-center justify-center flex-shrink-0"
+          >
+            <Maximize2 size={14} strokeWidth={2.2} className="text-text/75" />
+          </button>
+        </div>
+      )}
+
+      {/* Body */}
+      <div
+        className={`absolute left-0 right-0 px-4 overflow-y-auto no-scrollbar ${
+          controlsCollapsed ? 'top-[256px]' : 'top-[410px]'
+        } bottom-[110px]`}
+      >
+        {renderBody(false)}
       </div>
 
       {/* Transport */}
