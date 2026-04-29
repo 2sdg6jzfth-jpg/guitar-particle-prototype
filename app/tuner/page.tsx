@@ -5,6 +5,7 @@ import { CrossLitHalos } from '@/components/cross-lit-halos';
 import { StatusBar } from '@/components/status-bar';
 import { HomeIndicator } from '@/components/home-indicator';
 import { PageTitleBar } from '@/components/page-title-bar';
+import { SegmentedControl } from '@/components/segmented-control';
 import { ChevronDown, Check, Mic, MicOff } from 'lucide-react';
 import { autoCorrelate, centsBetween, freqToNote } from '@/lib/pitch';
 
@@ -75,8 +76,13 @@ const TUNINGS: Tuning[] = [
 ];
 
 type MicState = 'idle' | 'requesting' | 'listening' | 'denied' | 'error';
+type Mode = 'Tuning' | 'Chromatic';
+const MODE_OPTIONS = ['Tuning', 'Chromatic'] as const;
+
+const TUNE_BLUE = '#5DD3E8'; // cyan-deep, used as "in tune" blue
 
 export default function TunerPage() {
+  const [mode, setMode] = useState<Mode>('Tuning');
   const [tuningIdx, setTuningIdx] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [manualStringIdx, setManualStringIdx] = useState<number | null>(null);
@@ -94,14 +100,12 @@ export default function TunerPage() {
   const pickerRef = useRef<HTMLDivElement>(null);
   const tuningIdxRef = useRef(tuningIdx);
 
-  // Keep ref in sync so the audio loop sees the latest tuning
   useEffect(() => {
     tuningIdxRef.current = tuningIdx;
   }, [tuningIdx]);
 
   const tuning = TUNINGS[tuningIdx];
 
-  // Outside-click handler for picker
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
@@ -119,7 +123,6 @@ export default function TunerPage() {
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       });
       streamRef.current = stream;
-
       const Ctor =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -136,9 +139,7 @@ export default function TunerPage() {
       const loop = () => {
         analyser.getFloatTimeDomainData(buffer);
         const freq = autoCorrelate(buffer, ctx.sampleRate);
-
         if (freq > 60 && freq < 1500) {
-          // Find nearest string in current tuning
           const currentTuning = TUNINGS[tuningIdxRef.current];
           let bestIdx = 0;
           let bestAbsCents = Infinity;
@@ -153,8 +154,6 @@ export default function TunerPage() {
           });
           setDetected({ freq, nearestStringIdx: bestIdx, cents: bestSignedCents });
         }
-        // Else: keep last detection visible (don't reset to null on silence)
-
         rafRef.current = requestAnimationFrame(loop);
       };
       loop();
@@ -169,7 +168,6 @@ export default function TunerPage() {
     }
   };
 
-  // Auto-start mic on mount
   useEffect(() => {
     startMic();
     return () => {
@@ -182,35 +180,48 @@ export default function TunerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Effective target string: manual selection beats auto-detect
+  const isChromatic = mode === 'Chromatic';
+  const heardNote = detected ? freqToNote(detected.freq) : null;
+
+  // Compute target + cents based on mode
   const targetStringIdx =
     manualStringIdx !== null ? manualStringIdx : detected?.nearestStringIdx ?? 0;
   const targetString = tuning.strings[targetStringIdx];
 
-  // If manual mode AND we have a detected freq, recalc cents vs the manually-picked string
-  const displayCents =
+  const tuningCents =
     detected != null
       ? manualStringIdx !== null
         ? centsBetween(detected.freq, parseFloat(targetString.freq))
         : detected.cents
       : 0;
 
-  // Indicator position: -50¢ → 0%, 0¢ → 50%, +50¢ → 100%
+  const chromaticCents = heardNote ? heardNote.cents : 0;
+
+  const displayCents = isChromatic ? chromaticCents : tuningCents;
+
+  // Big display content
+  const bigLetter = isChromatic
+    ? heardNote?.name ?? '—'
+    : targetString.label;
+  const bigSubtitleTop = isChromatic ? 'HEARING' : 'TARGET';
+  const bigSubtitleValue = isChromatic
+    ? heardNote
+      ? `${heardNote.name}${heardNote.octave} · ${detected!.freq.toFixed(1)} Hz`
+      : 'Listening…'
+    : `${targetString.label}${targetString.octave} · ${targetString.freq} Hz`;
+
+  // Indicator + glows
   const indicatorPos = Math.max(0, Math.min(100, ((displayCents + 50) / 100) * 100));
   const inTune = detected != null && Math.abs(displayCents) < 5;
 
-  // Side-glow intensity: ramps from 0 at ±5¢ up to 1 at ±35¢ (caps there)
   const glowIntensity = (() => {
-    if (!detected) return 0;
+    if (!detected || inTune) return 0;
     const abs = Math.abs(displayCents);
     if (abs < 5) return 0;
     return Math.min(1, (abs - 5) / 30);
   })();
   const flatness = displayCents < 0 ? glowIntensity : 0;
   const sharpness = displayCents > 0 ? glowIntensity : 0;
-
-  // What note the mic is actually hearing (independent of nearest string)
-  const heardNote = detected ? freqToNote(detected.freq) : null;
 
   const selectTuning = (idx: number) => {
     setTuningIdx(idx);
@@ -224,7 +235,7 @@ export default function TunerPage() {
       <StatusBar />
       <PageTitleBar title="Tuner" />
 
-      {/* === Sharp/Flat side glows === */}
+      {/* Side glows */}
       <div
         className="absolute top-[140px] bottom-[140px] left-0 w-[180px] pointer-events-none transition-opacity duration-200"
         style={{
@@ -241,176 +252,226 @@ export default function TunerPage() {
           opacity: sharpness,
         }}
       />
-      {/* In-tune halo behind the big note */}
+      {/* In-tune blue halo */}
       <div
         className="absolute top-[170px] left-1/2 -translate-x-1/2 w-[260px] h-[200px] rounded-full pointer-events-none transition-opacity duration-300"
         style={{
           background:
-            'radial-gradient(circle, rgba(255,216,154,0.32), rgba(255,216,154,0.08) 50%, transparent 75%)',
+            'radial-gradient(circle, rgba(93,211,232,0.42), rgba(168,233,244,0.12) 50%, transparent 75%)',
           opacity: inTune ? 1 : 0,
         }}
       />
 
-      {/* Tuning preset picker */}
-      <div ref={pickerRef} className="absolute top-[108px] left-1/2 -translate-x-1/2 z-20">
-        <button
-          onClick={() => setPickerOpen(o => !o)}
-          className="flex items-center gap-2 px-4 py-2 bg-text/[0.04] border border-text/[0.08] rounded-3xl"
-        >
-          <span className="text-[13px] font-medium text-text">{tuning.name}</span>
-          <ChevronDown
-            size={12}
-            className={`text-amber transition-transform ${pickerOpen ? 'rotate-180' : ''}`}
-            strokeWidth={2.5}
-          />
-        </button>
-        {pickerOpen && (
-          <div className="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 w-[210px] bg-bg-surface border border-text/10 rounded-xl shadow-sheet overflow-hidden z-30">
-            {TUNINGS.map((t, i) => (
-              <button
-                key={t.id}
-                onClick={() => selectTuning(i)}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-left text-xs ${
-                  i === tuningIdx ? 'bg-amber/[0.08] text-amber' : 'text-text hover:bg-text/[0.04]'
-                }`}
-              >
-                <div className="flex flex-col">
-                  <span className="font-medium">{t.name}</span>
-                  <span className="text-[10px] text-text/45 tabular-nums mt-0.5">
-                    {t.strings.map(s => s.label).join(' · ')}
-                  </span>
-                </div>
-                {i === tuningIdx && <Check size={12} strokeWidth={2.5} />}
-              </button>
-            ))}
+      {/* Mode toggle + tuning preset (preset hidden in chromatic) */}
+      <div
+        className={`absolute top-[100px] left-4 right-4 flex items-center gap-2 z-20 ${
+          isChromatic ? 'justify-center' : ''
+        }`}
+      >
+        <SegmentedControl
+          options={MODE_OPTIONS}
+          value={mode}
+          onChange={setMode}
+          size="sm"
+          className="h-8 w-[136px]"
+        />
+        {!isChromatic && (
+          <div ref={pickerRef} className="relative flex-1">
+            <button
+              onClick={() => setPickerOpen(o => !o)}
+              className="w-full flex items-center justify-center gap-1.5 h-8 bg-text/[0.04] border border-text/[0.08] rounded-3xl"
+            >
+              <span className="text-[12px] font-medium text-text">{tuning.name}</span>
+              <ChevronDown
+                size={11}
+                strokeWidth={2.5}
+                className={`text-amber transition-transform ${pickerOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {pickerOpen && (
+              <div className="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 w-[210px] bg-bg-surface border border-text/10 rounded-xl shadow-sheet overflow-hidden z-30">
+                {TUNINGS.map((t, i) => (
+                  <button
+                    key={t.id}
+                    onClick={() => selectTuning(i)}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 text-left text-xs ${
+                      i === tuningIdx ? 'bg-amber/[0.08] text-amber' : 'text-text hover:bg-text/[0.04]'
+                    }`}
+                  >
+                    <div className="flex flex-col">
+                      <span className="font-medium">{t.name}</span>
+                      <span className="text-[10px] text-text/45 tabular-nums mt-0.5">
+                        {t.strings.map(s => s.label).join(' · ')}
+                      </span>
+                    </div>
+                    {i === tuningIdx && <Check size={12} strokeWidth={2.5} />}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Big note display: target prominent, heard underneath */}
-      <div className="absolute top-[180px] left-0 right-0 text-center pointer-events-none">
+      {/* Big note */}
+      <div className="absolute top-[178px] left-0 right-0 text-center pointer-events-none">
         <div
-          className={`text-[112px] font-light leading-none tabular-nums transition-colors ${
-            inTune ? 'text-amber' : 'text-text'
-          }`}
-          style={{ letterSpacing: '-3px' }}
-        >
-          {targetString.label}
-        </div>
-
-        {/* Target line */}
-        <div className="mt-2 text-[11px] tracking-wider uppercase text-text/45 font-medium">
-          Target
-        </div>
-        <div className="text-[13px] text-text/75 tabular-nums tracking-wider mt-0.5">
-          {targetString.label}
-          {targetString.octave} · {targetString.freq} Hz
-        </div>
-
-        {/* Hearing line */}
-        <div className="mt-3 text-[11px] tracking-wider uppercase text-text/45 font-medium">
-          Hearing
-        </div>
-        <div className="text-[13px] tabular-nums tracking-wider mt-0.5 min-h-[18px]">
-          {heardNote ? (
-            <>
-              <span
-                className={`font-medium ${
-                  inTune
-                    ? 'text-amber'
-                    : displayCents < 0
-                    ? 'text-cyan-deep'
-                    : 'text-amber-deep'
-                }`}
-              >
-                {heardNote.name}
-                {heardNote.octave}
-              </span>
-              <span className="text-text/55"> · {detected!.freq.toFixed(1)} Hz</span>
-            </>
-          ) : (
-            <span className="text-text/35">—</span>
-          )}
-        </div>
-      </div>
-
-      {/* Cents meter */}
-      <div className="absolute top-[420px] left-6 right-6">
-        <div
-          className="relative h-[5px] rounded-sm overflow-hidden"
+          className="text-[112px] font-light leading-none tabular-nums transition-colors duration-200"
           style={{
-            background:
-              'linear-gradient(to right, #5DD3E8 0%, #5DD3E8 28%, rgba(245,235,215,0.18) 44%, rgba(245,235,215,0.18) 56%, #FFD89A 72%, #FFD89A 100%)',
+            letterSpacing: '-3px',
+            color: inTune ? TUNE_BLUE : '#F5EBD7',
           }}
         >
-          <div className="absolute -top-2 -bottom-2 left-1/2 w-0.5 -ml-px bg-text/85 rounded-full" />
+          {bigLetter}
+        </div>
+
+        <div className="mt-2 text-[11px] tracking-wider uppercase text-text/45 font-medium">
+          {bigSubtitleTop}
+        </div>
+        <div className="text-[13px] text-text/75 tabular-nums tracking-wider mt-0.5">
+          {bigSubtitleValue}
+        </div>
+
+        {/* In tuning mode, also show what we're actually hearing */}
+        {!isChromatic && (
+          <>
+            <div className="mt-3 text-[11px] tracking-wider uppercase text-text/45 font-medium">
+              Hearing
+            </div>
+            <div className="text-[13px] tabular-nums tracking-wider mt-0.5 min-h-[18px]">
+              {heardNote && detected ? (
+                <>
+                  <span
+                    className="font-medium transition-colors"
+                    style={{
+                      color: inTune
+                        ? TUNE_BLUE
+                        : tuningCents < 0
+                        ? '#5DD3E8'
+                        : '#FFB661',
+                    }}
+                  >
+                    {heardNote.name}
+                    {heardNote.octave}
+                  </span>
+                  <span className="text-text/55"> · {detected.freq.toFixed(1)} Hz</span>
+                </>
+              ) : (
+                <span className="text-text/35">—</span>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Cents meter — bigger dot, fill bar from center to dot */}
+      <div className="absolute top-[420px] left-6 right-6">
+        <div
+          className="relative h-[8px] rounded-full overflow-visible"
+          style={{
+            background:
+              'linear-gradient(to right, rgba(93,211,232,0.18) 0%, rgba(245,235,215,0.06) 35%, rgba(245,235,215,0.06) 65%, rgba(255,216,154,0.18) 100%)',
+            boxShadow: 'inset 0 0 0 1px rgba(245,235,215,0.06)',
+          }}
+        >
+          {/* Fill bar from center toward dot — shrinks as you tune in */}
+          {detected && !inTune && (
+            <div
+              className="absolute top-0 bottom-0 transition-all duration-200 rounded-full"
+              style={{
+                left: displayCents < 0 ? `${indicatorPos}%` : '50%',
+                width: `${Math.abs(50 - indicatorPos)}%`,
+                background: displayCents < 0 ? '#5DD3E8' : '#FFD89A',
+                opacity: 0.7,
+              }}
+            />
+          )}
+
+          {/* Center marker */}
+          <div className="absolute -top-2.5 -bottom-2.5 left-1/2 w-[2px] -ml-px bg-text/85 rounded-full" />
+
+          {/* Indicator dot — bigger, blue when in tune */}
           <div
-            className={`absolute -top-2.5 w-5 h-5 rounded-full border-[1.5px] -ml-2.5 transition-all duration-150 ${
-              inTune
-                ? 'bg-amber border-amber'
-                : displayCents < 0
-                ? 'bg-text border-cyan-deep'
-                : 'bg-text border-amber'
-            }`}
+            className="absolute w-7 h-7 rounded-full border-[2.5px] -ml-[14px] -top-[10px] transition-all duration-200"
             style={{
               left: `${indicatorPos}%`,
-              boxShadow: inTune
-                ? '0 0 18px rgba(255,216,154,0.65)'
+              background: inTune ? TUNE_BLUE : '#F5EBD7',
+              borderColor: inTune
+                ? '#A8E9F4'
                 : displayCents < 0
-                ? '0 0 18px rgba(93,211,232,0.55)'
-                : '0 0 18px rgba(255,216,154,0.35)',
+                ? '#5DD3E8'
+                : '#FFD89A',
+              boxShadow: inTune
+                ? '0 0 24px rgba(93,211,232,0.95), 0 0 48px rgba(168,233,244,0.4)'
+                : `0 0 12px ${
+                    displayCents < 0 ? 'rgba(93,211,232,0.45)' : 'rgba(255,216,154,0.4)'
+                  }`,
             }}
           />
         </div>
-        <div className="flex justify-between mt-3.5 text-[9px] text-text/50 tracking-wider uppercase tabular-nums">
+
+        <div className="flex justify-between mt-4 text-[9px] text-text/50 tracking-wider uppercase tabular-nums">
           <span>−50</span>
           <span>−10</span>
           <span>0</span>
           <span>+10</span>
           <span>+50</span>
         </div>
-        {detected != null && (
-          <div className="mt-2 text-center text-[11px] text-text/55 tabular-nums">
-            {Math.abs(displayCents) < 1 ? '0' : (displayCents > 0 ? '+' : '') + displayCents.toFixed(1)}
-            ¢{' '}
+
+        {detected && (
+          <div className="mt-2 text-center text-[11px] tabular-nums">
             {inTune ? (
-              <span className="text-amber font-medium">In tune</span>
-            ) : displayCents < 0 ? (
-              <span className="text-cyan-deep">Flat</span>
+              <span className="font-medium" style={{ color: TUNE_BLUE }}>
+                ✓ In tune
+              </span>
             ) : (
-              <span className="text-amber/80">Sharp</span>
+              <>
+                <span className="text-text/55">
+                  {Math.abs(displayCents) < 1
+                    ? '0'
+                    : (displayCents > 0 ? '+' : '') + displayCents.toFixed(1)}
+                  ¢{' '}
+                </span>
+                <span className={displayCents < 0 ? 'text-cyan-deep' : 'text-amber-deep'}>
+                  {displayCents < 0 ? 'Flat' : 'Sharp'}
+                </span>
+              </>
             )}
           </div>
         )}
       </div>
 
-      {/* String buttons */}
-      <div className="absolute top-[510px] left-4 right-4 flex justify-between">
-        {tuning.strings.map((s, i) => {
-          const active = i === targetStringIdx;
-          return (
-            <button
-              key={`${tuning.id}-${i}`}
-              onClick={() => setManualStringIdx(i === manualStringIdx ? null : i)}
-              className={`w-10 h-10 rounded-full text-sm font-medium transition-colors ${
-                active
-                  ? 'bg-amber/15 border border-amber/50 text-amber'
-                  : 'bg-text/[0.04] border border-text/10 text-text'
-              }`}
-            >
-              {s.label}
-            </button>
-          );
-        })}
-      </div>
+      {/* String buttons — only in tuning mode */}
+      {!isChromatic && (
+        <div className="absolute top-[510px] left-4 right-4 flex justify-between">
+          {tuning.strings.map((s, i) => {
+            const active = i === targetStringIdx;
+            return (
+              <button
+                key={`${tuning.id}-${i}`}
+                onClick={() => setManualStringIdx(i === manualStringIdx ? null : i)}
+                className={`w-10 h-10 rounded-full text-sm font-medium transition-colors ${
+                  active
+                    ? 'bg-amber/15 border border-amber/50 text-amber'
+                    : 'bg-text/[0.04] border border-text/10 text-text'
+                }`}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      {/* Mic status / instructions */}
+      {/* Mic status */}
       <div className="absolute top-[570px] left-0 right-0 text-center px-6">
         {micState === 'listening' && (
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-text/50">
             <Mic size={11} className="text-amber" />
             <span>
-              {manualStringIdx !== null
+              {isChromatic
+                ? 'Listening · play any note'
+                : manualStringIdx !== null
                 ? `Tuning ${tuning.strings[manualStringIdx].label}${tuning.strings[manualStringIdx].octave} — tap again for auto`
                 : 'Listening · play any string'}
             </span>
